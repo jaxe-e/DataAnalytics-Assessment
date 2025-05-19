@@ -1,75 +1,167 @@
 # DataAnalytics-Assessment 
 
-This document provides an overview and explanation of a set of SQL queries designed to analyze customer data in a financial institution. The queries focus on customer segmentation, transaction behavior, account activity, and customer lifetime value estimation.
+This repository contains SQL queries to address the data analysis questions provided in the assessment. The queries are organized as follows:
 
-Each question addresses a specific business need, and the queries demonstrate how to extract actionable insights from the database.
+DataAnalytics-Assessment/
+│
+├── Assessment_Q1.sql
+├── Assessment_Q2.sql
+├── Assessment_Q3.sql
+├── Assessment_Q4.sql
+│
+└── README.md
 
-### Per-Question Explanations
+## Data Cleaning Explanation
 
-#### Assessment Q1: High-Value Customers with Multiple Products
+Before addressing the specific questions, I performed some data cleaning to ensure the `users_customuser` table was suitable for analysis.  Here's a breakdown of the `data cleaning.sql` script:
 
-**Objective:** Identify customers who have both a savings and an investment plan.
+```sql
+CREATE TEMPORARY TABLE clean_users AS
+SELECT 
+    -- Keep all original columns except `name`, which we update below
+    id,
+    email,
+    first_name,
+    last_name,
+    phone_number,
+    signup_device,
+    enabled_at,
+    last_login,
+
+    -- Cleaned name column (digits stripped, proper case, fallback from email if needed)
+    CONCAT(
+        -- Cleaned first name
+        CASE
+            WHEN (TRIM(first_name) = '' OR first_name IS NULL)
+                 AND (TRIM(last_name) = '' OR last_name IS NULL)
+                 AND LOCATE('+', email) > 0
+            THEN CONCAT(
+                UPPER(LEFT(REGEXP_REPLACE(SUBSTRING_INDEX(email, '+', 1), '[0-9]', ''), 1)),
+                LOWER(SUBSTRING(REGEXP_REPLACE(SUBSTRING_INDEX(email, '+', 1), '[0-9]', ''), 2))
+            )
+            ELSE CONCAT(
+                UPPER(LEFT(REGEXP_REPLACE(first_name, '[0-9]', ''), 1)),
+                LOWER(SUBSTRING(REGEXP_REPLACE(first_name, '[0-9]', ''), 2))
+            )
+        END,
+        ' ',
+        -- Cleaned last name
+        CASE
+            WHEN (TRIM(first_name) = '' OR first_name IS NULL)
+                 AND (TRIM(last_name) = '' OR last_name IS NULL)
+                 AND LOCATE('+', email) > 0
+            THEN CONCAT(
+                UPPER(LEFT(REGEXP_REPLACE(SUBSTRING_INDEX(SUBSTRING_INDEX(email, '@', 1), '+', -1), '[0-9]', ''), 1)),
+                LOWER(SUBSTRING(REGEXP_REPLACE(SUBSTRING_INDEX(SUBSTRING_INDEX(email, '@', 1), '+', -1), '[0-9]', ''), 2))
+            )
+            ELSE CONCAT(
+                UPPER(LEFT(REGEXP_REPLACE(last_name, '[0-9]', ''), 1)),
+                LOWER(SUBSTRING(REGEXP_REPLACE(last_name, '[0-9]', ''), 2))
+            )
+        END
+    ) AS name
+
+FROM users_customuser
+WHERE email LIKE '%@cowrywise.com%'
+  AND email REGEXP '\\.com$';
+````
+### 🧹 Explanation
+
+#### **Temporary Table Creation**
+
+A temporary table `clean_users` is created. This allows us to perform the data cleaning steps without altering the original `users_customuser` table and makes subsequent queries more readable.
+
+#### **Column Selection**
+
+All original columns from `users_customuser` are included, except for the `name` column, which is regenerated.
+
+#### **Name Cleaning Logic**
+
+The core of the script focuses on cleaning the `name` column. It handles cases where first or last names are missing or contain digits:
+
+- **Missing Name Handling**: If both `first_name` and `last_name` are empty or null, the code extracts the name from the email address (assuming a format like `firstname+lastname@cowrywise.com`). It uses `LOCATE`, `SUBSTRING_INDEX`, and `REGEXP_REPLACE` to achieve this.
+
+- **Digit Removal**: The `REGEXP_REPLACE` function removes any digits from the `first_name` and `last_name` columns.
+
+- **Proper Case Conversion**: The `UPPER` and `LOWER` functions are used to convert the names to proper case (e.g., "John Doe").
+
+#### **Filtering**
+
+The script filters the `users_customuser` table to only include users with a valid company email.
+
+This cleaning process ensures that the `name` column is consistently formatted and free of extraneous characters, which is crucial for accurate reporting in the subsequent queries.
+
+---
+
+### 📌 Per-Question Explanations
+
+#### **Assessment Q1: High-Value Customers with Multiple Products**
 
 **Approach:**
 
-1. The query joins the `clean_users`, `savings_savingsaccount`, and `plans_plan` tables to link customer information with their savings and investment accounts.
-2. It filters for investment plans using `pl.is_a_fund = 1`.
-3. It counts the distinct savings accounts and investment plans for each customer using `COUNT(DISTINCT sa.id)` and `COUNT(DISTINCT CASE WHEN pl.is_a_fund = 1 THEN pl.id END)`.
-4. It calculates the total deposits for each customer using `SUM(sa.confirmed_amount)`.
-5. It filters for customers with at least one savings account and one investment plan using a `HAVING` clause.
-6. The results are ordered by total deposits in descending order, using the `ROUND` function to format numeric results for better readability.
+- Joined the `clean_users`, `savings_savingsaccount`, and `plans_plan` tables to link customer information with their savings accounts and plans.
+- Used `COUNT(DISTINCT ...)` to count distinct savings accounts and investment plans. Used `CASE WHEN` to count only plans where `is_a_fund = 1`.
+- Filtered for customers having at least one savings account and one investment plan using a `HAVING` clause.
+- Calculated total deposits with `SUM(sa.confirmed_amount)` and converted from kobo to naira.
+- Ordered the results by `total_deposits` in descending order.
 
-**Rationale:** This approach efficiently identifies customers who have diversified their investments with the institution, indicating higher value and potential for further engagement.
+**Challenges:**
 
-#### Assessment Q2: Transaction Frequency Analysis
+- Ensuring only investment plans were counted correctly with conditional logic.
+- Handling the kobo to naira conversion consistently.
 
-**Objective:** Analyze customer transaction frequency and categorize them into high, medium, and low frequency users.
+---
 
-**Approach:**
-
-1. A subquery calculates the average number of transactions per customer per month.
-2. The main query categorizes customers based on their average monthly transactions using a `CASE` statement.
-3. The results are grouped by frequency category, and the count of customers in each category is provided.
-4. The results are ordered by frequency category.
-
-**Rationale:** This analysis helps segment customers based on their activity levels, allowing for targeted marketing and resource allocation.
-
-#### Assessment Q3: Account Inactivity Alert
-
-**Objective:** Flag accounts with no inflow transactions for over one year.
+#### **Assessment Q2: Transaction Frequency Analysis**
 
 **Approach:**
 
-1. The query uses Common Table Expressions (CTEs) to organize the data retrieval:
-    * `plan_transactions`: Selects plan details and joins with savings accounts to get transaction dates, filtering for funded plans and getting the last transaction date for each plan.
-    * `savings_transactions`: Selects savings account details and gets the last transaction date for each savings account.
-    * `user_accounts`: Selects user ID and activation date (`enabled_at`) from `clean_users`.
-2. The `user_accounts` CTE is joined with the `plan_transactions` and `savings_transactions` CTEs using `LEFT JOIN` on the user ID.
-3. The query filters for accounts where the last transaction date is more than one year prior to the current date.
-4. The query also filters for users who have an activation date.
-5. It returns the owner ID, account type, last transaction date, and inactivity days.
+- Joined `clean_users` and `savings_savingsaccount`.
+- Calculated the total number of transactions per customer and their active months using `TIMESTAMPDIFF`.
+- Computed the average transactions per month.
+- Used a `CASE` statement to categorize customers into:
+  - "High Frequency"
+  - "Medium Frequency"
+  - "Low Frequency"
+- Grouped results by frequency category and counted users in each.
 
-**Rationale:** Identifying inactive accounts is crucial for risk management, customer re-engagement, and operational efficiency. The use of `COALESCE` is essential here to handle potential null values when joining tables and calculating the last transaction dates.
+**Challenges:**
 
-#### Assessment Q4: Customer Lifetime Value (CLV) Estimation
+- Preventing division by zero with `NULLIF` when calculating averages.
+- Accurately computing average monthly transactions.
 
-**Objective:** Estimate the Customer Lifetime Value (CLV) for each customer.
+---
+
+#### **Assessment Q3: Account Inactivity Alert**
 
 **Approach:**
 
-1. The query calculates the account tenure in months since signup.
-2. It counts the total number of transactions for each customer.
-3. It estimates CLV using a simplified formula:  
-    * CLV = (Average Transactions per Month) × 12 × Average Profit per Transaction  
-    * Where Average Profit per Transaction is assumed to be 0.1% of the average transaction value.
-4. The results are ordered by estimated CLV in descending order.
+- Used Common Table Expressions (CTEs) for better query organization.
+- Created CTEs for the last transaction date per savings and investment account.
+- Joined CTEs with `clean_users`.
+- Filtered accounts where the last transaction date was over a year ago using `DATE_SUB` and `DATEDIFF`.
+- Included both savings and investment accounts.
 
-**Rationale:** CLV estimation helps prioritize customer segments, evaluate marketing investments, and understand the long-term value of customer relationships.
+**Challenges:**
 
-### Challenges
+- Merging results from both account types into one result set.
+- Correctly calculating inactive days.
 
-* **Understanding the Data Model:** The primary challenge was fully understanding the relationships between tables and the meaning of each column.
-* **Ensuring Accuracy:** It was crucial to ensure the accuracy of calculations, especially in the CLV estimation and transaction frequency analysis.
-* **Handling Null Values:** The use of `COALESCE` was essential to handle potential null values when joining tables and calculating last transaction dates, preventing errors or incomplete data.
+---
+
+#### **Assessment Q4: Customer Lifetime Value (CLV) Estimation**
+
+**Approach:**
+
+- Joined `clean_users` and `savings_savingsaccount`.
+- Calculated tenure in months using `TIMESTAMPDIFF`.
+- Counted total transactions.
+- Applied CLV formula: CLV = (total_transactions / tenure) * 12 * avg_profit_per_transaction. I assumed avg_profit_per_transaction is 0.1% of the average transaction value.
+
+**Challenges:**
+
+- Implementing the CLV formula accurately.
+- Handling potential division by zero in the CLV calculation using `NULLIF`.
+- Calculating the average transaction value and applying the profit percentage.
 
 ---
