@@ -1,6 +1,4 @@
-# DataAnalytics-Assessment for Data Analyst Job application at Cowrywise
-
-# Customer Insights and Transaction Analysis – SQL Project
+# DataAnalytics-Assessment
 
 This project contains SQL queries developed to analyze user transaction data across savings and investment products. The analysis supports business teams such as Marketing, Finance, and Operations with data-driven insights into user behavior, transaction patterns, inactivity risks, and lifetime value estimations.
 
